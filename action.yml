@@ -1,0 +1,87 @@
+name: Deploy to Novence
+description: >-
+  Deploy a static site folder to Novence. Signs in with GitHub OIDC when the repository
+  is connected to a project, so there is no API key to store as a secret.
+author: Novence
+branding:
+  icon: upload-cloud
+  color: blue
+
+inputs:
+  dir:
+    description: >-
+      Folder to deploy (your build output). Leave empty to auto-detect dist, build, out,
+      public or _site. Novence does not build your site: run your build in an earlier step.
+    required: false
+    default: ""
+  project:
+    description: >-
+      Project id. Only needed when the repository is connected to more than one project,
+      or when deploying with api-key to a specific project.
+    required: false
+    default: ""
+  api-key:
+    description: >-
+      Novence API key. Leave empty for a connected repository: the job signs in with
+      GitHub OIDC (needs `permissions: id-token: write`). Set it only to deploy without
+      connecting the repository.
+    required: false
+    default: ""
+  keep-extra:
+    description: >-
+      Set to "true" to keep files the folder no longer has. By default the site is made
+      to match the folder (files under /data/*.json are always kept).
+    required: false
+    default: "false"
+  timeout:
+    description: Minutes to wait for quality checks and go-live. Default 15.
+    required: false
+    default: ""
+  cli-version:
+    description: Version of the novence CLI to run.
+    required: false
+    default: "0.6"
+
+outputs:
+  url:
+    description: Live URL of the site.
+    value: ${{ steps.deploy.outputs.url }}
+  preview-url:
+    description: Per-deploy preview URL (Pro and Scale). Empty otherwise.
+    value: ${{ steps.deploy.outputs.preview-url }}
+  deployment-id:
+    description: Id of the deployment.
+    value: ${{ steps.deploy.outputs.deployment-id }}
+  status:
+    description: live, failed, or the in-progress status if the wait ran out.
+    value: ${{ steps.deploy.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - id: deploy
+      shell: bash
+      # Inputs reach the script as environment variables, never by interpolation into it.
+      env:
+        NOVENCE_API_KEY: ${{ inputs.api-key }}
+        INPUT_DIR: ${{ inputs.dir }}
+        INPUT_PROJECT: ${{ inputs.project }}
+        INPUT_KEEP_EXTRA: ${{ inputs.keep-extra }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_CLI_VERSION: ${{ inputs.cli-version }}
+        REPORT_SCRIPT: ${{ github.action_path }}/report.mjs
+      run: |
+        set -uo pipefail
+
+        args=(deploy)
+        if [ -n "$INPUT_DIR" ]; then args+=("$INPUT_DIR"); fi
+        args+=(--json --no-input)
+        if [ -n "$INPUT_PROJECT" ]; then args+=(--project "$INPUT_PROJECT"); fi
+        if [ -n "$INPUT_TIMEOUT" ]; then args+=(--timeout "$INPUT_TIMEOUT"); fi
+        if [ "$INPUT_KEEP_EXTRA" = "true" ]; then args+=(--keep-extra); fi
+
+        out="$(npx --yes "novence@${INPUT_CLI_VERSION}" "${args[@]}")"
+        code=$?
+        printf '%s\n' "$out"
+        printf '%s' "$out" | node "$REPORT_SCRIPT" "$code"
+        exit "$code"
